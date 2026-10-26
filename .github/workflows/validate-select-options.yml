@@ -7,10 +7,11 @@ permissions:
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
     env:
       ANONYMIZED_TELEMETRY: 'false'
       PYTHONUTF8: '1'
+      IN_DOCKER: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,12 +40,16 @@ jobs:
       - name: Run serializer and real browser tests
         run: |
           set -o pipefail
-          uv run pytest tests/ci/test_dom_select_options.py tests/ci/test_dom_paint_order_serialization.py tests/ci/test_image_only_dom_representation.py tests/ci/test_dom_visibility.py tests/ci/browser/test_dom_serializer_session_identity.py tests/ci/browser/test_dom_selector_index_collisions.py tests/ci/browser/test_dom_serializer.py -q --tb=short -o addopts= --junitxml=after.xml 2>&1 | tee after.log
+          uv run pytest tests/ci/test_dom_select_options.py tests/ci/test_dom_paint_order_serialization.py tests/ci/test_image_only_dom_representation.py tests/ci/test_dom_visibility.py tests/ci/browser/test_dom_serializer_session_identity.py tests/ci/browser/test_dom_selector_index_collisions.py -q --tb=short -o addopts= --junitxml=after.xml 2>&1 | tee after.log
       - name: Run unmodified hooks
         run: |
           set -o pipefail
           uv run pre-commit run --files browser_use/dom/serializer/serializer.py tests/ci/test_dom_select_options.py 2>&1 | tee hooks.log
           git diff --exit-code
+      - name: Run real browser coverage with upstream CI environment
+        run: |
+          set -o pipefail
+          timeout 240s uv run pytest tests/ci/browser/test_dom_serializer.py -x -q --tb=short -o addopts= --junitxml=browser.xml 2>&1 | tee browser.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -56,3 +61,5 @@ jobs:
             after.xml
             after.log
             hooks.log
+            browser.xml
+            browser.log
