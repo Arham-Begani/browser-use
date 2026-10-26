@@ -1,0 +1,58 @@
+name: Validate select option hints
+on:
+  push:
+    branches: [validate/select-option-omission-hint]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANONYMIZED_TELEMETRY: 'false'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/select-option-omission-hint
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.11'
+      - name: Record exact source
+        run: git rev-parse HEAD | tee source-sha.txt
+      - name: Install development dependencies
+        run: uv sync --dev
+      - name: Prove regression against unchanged parent
+        shell: bash
+        run: |
+          git show HEAD^:browser_use/dom/serializer/serializer.py > browser_use/dom/serializer/serializer.py
+          set +e
+          uv run pytest tests/ci/test_dom_select_options.py -q -o addopts= --junitxml=before.xml > before.log 2>&1
+          result=$?
+          set -e
+          git restore browser_use/dom/serializer/serializer.py
+          test "$result" -eq 1
+          uv run python -c 'import xml.etree.ElementTree as E; s=E.parse("before.xml").getroot().find("testsuite"); assert s is not None; assert (s.attrib["tests"],s.attrib["failures"],s.attrib["errors"]) == ("4","3","0"), s.attrib'
+      - name: Install Chromium
+        run: uvx playwright install chromium --with-deps --no-shell
+      - name: Run serializer and real browser tests
+        run: |
+          set -o pipefail
+          uv run pytest tests/ci/test_dom_select_options.py tests/ci/test_dom_paint_order_serialization.py tests/ci/test_image_only_dom_representation.py tests/ci/test_dom_visibility.py tests/ci/browser/test_dom_serializer_session_identity.py tests/ci/browser/test_dom_selector_index_collisions.py tests/ci/browser/test_dom_serializer.py -q --tb=short -o addopts= --junitxml=after.xml 2>&1 | tee after.log
+      - name: Run unmodified hooks
+        run: |
+          set -o pipefail
+          uv run pre-commit run --files browser_use/dom/serializer/serializer.py tests/ci/test_dom_select_options.py 2>&1 | tee hooks.log
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: select-option-validation
+          path: |
+            source-sha.txt
+            before.xml
+            before.log
+            after.xml
+            after.log
+            hooks.log
